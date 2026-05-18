@@ -3,9 +3,11 @@ import pandas as pd
 import time
 import os
 
+
 HEADERS = {
     "User-Agent": "gvip-predictor benjamincheng18@gmail.com"
 }
+
 
 def get_13f_filers_for_quarter(year: int, quarter: int) -> pd.DataFrame:
     """
@@ -50,13 +52,14 @@ def get_13f_filers_for_quarter(year: int, quarter: int) -> pd.DataFrame:
     print(f"{year} Q{quarter}: found {len(df)} 13F-HR filers")
     return df
 
+
 if __name__ == "__main__":
-    # Create output directory if it doesn't exist
     os.makedirs("data/raw/fund_universe", exist_ok=True)
     
     df = get_13f_filers_for_quarter(2024, 1)
     
-    # Save to CSV
-    output_path = "data/raw/fund_universe/filers_2024_Q1.csv"
-    df.to_csv(output_path, index=False)
-    print(f"Saved to {output_path}")
+    # Inspect the data
+    print(df.dtypes)
+    print("\nSample:")
+    print(df.head(10))
+    print("\nTotal filers:", len(df))

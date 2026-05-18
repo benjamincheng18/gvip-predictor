@@ -112,27 +112,51 @@ def parse_holdings_xml(xml_url: str) -> pd.DataFrame:
     return df
 
 
+def parse_cover_page(accession_number: str, cik: str) -> dict:
+    """
+    Fetch and parse the cover page XML to get portfolio summary.
+    Much faster than fetching full holdings — used for pre-filtering.
+    """
+    acc_formatted = accession_number.replace("-", "")
+    cik_int = int(cik)
+    
+    url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc_formatted}/primary_doc.xml"
+    
+    response = requests.get(url, headers=HEADERS)
+    time.sleep(0.1)
+    
+    if response.status_code != 200:
+        return {}
+    
+    root = etree.fromstring(response.content)
+    
+    NS = "http://www.sec.gov/edgar/thirteenffiler"
+    
+    def find_text(tag: str) -> str:
+        el = root.find(f".//{{{NS}}}{tag}")
+        return el.text if el is not None else None
+    
+    return {
+        "value_total": find_text("tableValueTotal"),
+        "entry_total": find_text("tableEntryTotal"),
+        "period_of_report": find_text("periodOfReport"),
+        "included_managers_count": find_text("otherIncludedManagersCount"),
+        "is_confidential_omitted": find_text("isConfidentialOmitted")
+    }
+
+
 if __name__ == "__main__":
     result = get_fund_filings("1067983")
     filings = result["filings"]["recent"]
     
+    import pandas as pd
     df = pd.DataFrame(filings)
     df_13f = df[df["form"] == "13F-HR"]
     
     latest = df_13f.iloc[0]
     accession = latest["accessionNumber"]
-    
-    xml_url = get_holdings_xml_url(accession, "1067983")
-    holdings_df = parse_holdings_xml(xml_url)
 
-    # Aggregate duplicate CUSIPs
-    holdings_df = holdings_df.groupby(["cusip", "name"]).agg(
-        value=("value", "sum"),
-        shares=("shares", "sum")
-    ).reset_index()
-    
-    # Sort by value descending
-    holdings_df = holdings_df.sort_values("value", ascending=False)
-    
-    print(holdings_df.head(10))
-    print("Unique holdings:", len(holdings_df))
+    cover = parse_cover_page(accession, "1067983")
+    print("Cover page data:")
+    for k, v in cover.items():
+        print(f"  {k}: {v}")
