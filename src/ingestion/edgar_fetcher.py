@@ -1,6 +1,8 @@
 import requests
 import time
+import re
 import pandas as pd
+from lxml import etree
 
 
 HEADERS = {
@@ -61,11 +63,9 @@ def get_holdings_xml_url(accession_number: str, cik: str) -> str:
     time.sleep(0.1)
 
     # Fina all XML files in the index page
-    from lxml import etree
     content = response.text
 
     # Look for XML filenames in the HTML
-    import re
     xml_files = re.findall(r'href="([^"]+\.xml)"', content)
     
     # Filter out primary_doc.xml — we want the holdings table
@@ -85,7 +85,6 @@ def parse_holdings_xml(xml_url: str) -> pd.DataFrame:
     Fetch and parse the holdings XML file into a clean DataFrame.
     Each row = one stock holding.
     """
-    from lxml import etree
 
     response = requests.get(xml_url, headers=HEADERS)
     time.sleep(0.1)
@@ -117,7 +116,6 @@ if __name__ == "__main__":
     result = get_fund_filings("1067983")
     filings = result["filings"]["recent"]
     
-    import pandas as pd
     df = pd.DataFrame(filings)
     df_13f = df[df["form"] == "13F-HR"]
     
