@@ -26,7 +26,7 @@ def safe_get(url: str, retries = 3) -> requests.Response:
             response = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
             if response.status_code == 429: # rate limited
                 wait = 2 ** attempt
-                print (f"Rate limited, waiting {wait}s...")
+                print(f"Rate limited, waiting {wait}s...")
                 time.sleep(wait)
                 continue
             time.sleep(0.1)

@@ -54,12 +54,23 @@ def get_13f_filers_for_quarter(year: int, quarter: int) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    os.makedirs("data/raw/fund_universe", exist_ok=True)
-    
-    df = get_13f_filers_for_quarter(2024, 1)
-    
-    # Inspect the data
-    print(df.dtypes)
-    print("\nSample:")
-    print(df.head(10))
-    print("\nTotal filers:", len(df))
+    os.makedirs(os.path.join("data/raw/fund_universe"), exist_ok=True)
+
+    quarters_to_run = [
+        (2022, 1), (2022, 2), (2022, 3), (2022, 4),
+        (2023, 1), (2023, 2), (2023, 3), (2023, 4),
+        (2024, 1), (2024, 2), (2024, 3), (2024, 4),
+        (2025, 1), (2025, 2), (2025, 3), (2025, 4),
+        (2026, 1)
+    ]
+
+    for year, quarter in quarters_to_run:
+        output_path = f"data/raw/fund_universe/filers_{year}_Q{quarter}.csv"
+
+        if os.path.exists(output_path):
+            print(f"{year} Q{quarter}: already exists, skipping")
+            continue
+
+        df = get_13f_filers_for_quarter(year, quarter)
+        df.to_csv(output_path, index=False)
+        print(f"Saved to {output_path}")
