@@ -1,0 +1,11 @@
+fund_universe:
+  min_portfolio_value_thousands: 1000000  # $1B
+  min_positions: 10
+  max_positions: 200
+
+pipeline:
+  max_workers: 10
+  request_timeout: 10
+
+edgar:
+  user_agent: "gvip-predictor bencheng18@gmail.com"

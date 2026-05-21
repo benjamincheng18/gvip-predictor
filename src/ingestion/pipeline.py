@@ -4,13 +4,18 @@ import time
 from edgar_fetcher import get_fund_filings, get_holdings_xml_url, parse_holdings_xml, parse_cover_page
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import yaml
 
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.yaml")
 
-# GS GVIP qualifying criteria
-MIN_PORTFOLIO_VALUE = 100_000   # $100M represented in thousands 
-MIN_POSITIONS = 10
-MAX_POSITIONS = 200
+with open(CONFIG_PATH, "r") as f:
+    config = yaml.safe_load(f)
 
+MIN_PORTFOLIO_VALUE = config["fund_universe"]["min_portfolio_value_thousands"]
+MIN_POSITIONS = config["fund_universe"]["min_positions"]
+MAX_POSITIONS = config["fund_universe"]["max_positions"]
+MAX_WORKERS = config["pipeline"]["max_workers"]
 
 def process_fund(cik: str, year: int, quarter: int) -> pd.DataFrame:
     """
@@ -92,7 +97,7 @@ if __name__ == "__main__":
     QUARTER = 1
     
     filers = pd.read_csv("data/raw/fund_universe/filers_2024_Q1.csv")
-    filers = filers.head(20)  # comment this out for full run
+    # filers = filers.head(20)  # comment this out for full run
     
     output_path = f"data/raw/holdings_{YEAR}_Q{QUARTER}.csv"
     processed_path = f"data/raw/processed_ciks_{YEAR}_Q{QUARTER}.txt"
@@ -111,7 +116,7 @@ if __name__ == "__main__":
     
     start = time.time()
     
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor: 
         futures = {
             executor.submit(process_fund, str(row['cik']), YEAR, QUARTER): row['cik']
             for _, row in remaining.iterrows()
@@ -119,6 +124,8 @@ if __name__ == "__main__":
         
         for future in as_completed(futures):
             cik = futures[future]
+            completed = len(processed_ciks) + sum(1 for f in futures if f.done())
+            print(f"Progress: {completed}/{len(filers)} | CIK {cik}", end="\r")
             result = future.result()
             
             # Save to tracking file regardless of qualification

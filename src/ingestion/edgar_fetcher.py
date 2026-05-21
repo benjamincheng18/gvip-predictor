@@ -3,11 +3,41 @@ import time
 import re
 import pandas as pd
 from lxml import etree
+import yaml
+import os
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.yaml")
+
+with open(CONFIG_PATH, "r") as f:
+    config = yaml.safe_load(f)
+
+HEADERS = {"User-Agent": config["edgar"]["user_agent"]}
+TIMEOUT = config["pipeline"]["request_timeout"]
 
 
-HEADERS = {
-    "User-Agent": "gvip-predictor bencheng18@gmail.com"
-}
+def safe_get(url: str, retries = 3) -> requests.Response:
+    """
+    GET request with retry and exponential backoff.
+    Handles SEC rate limiting gracefully.
+    """
+    for attempt in range(retries):
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+            if response.status_code == 429: # rate limited
+                wait = 2 ** attempt
+                print (f"Rate limited, waiting {wait}s...")
+                time.sleep(wait)
+                continue
+            time.sleep(0.1)
+            return response
+        except requests.exceptions.Timeout:
+            print(f"Timeout on attempt {attempt + 1}: {url}")
+            time.sleep(2 ** attempt)
+        except Exception as e:
+            print(f"Error on attempt {attempt + 1}: {e}")
+            time.sleep(2 ** attempt)
+    return None
 
 
 def get_fund_filings(cik: dir) -> dict:
@@ -18,7 +48,9 @@ def get_fund_filings(cik: dir) -> dict:
     cik_padded = cik.zfill(10) # SEC requires 10-digit CIK
     url = f"https://data.sec.gov/submissions/CIK{cik_padded}.json"
 
-    response = requests.get(url, headers=HEADERS)
+    response = safe_get(url)
+    if response is None or response.status_code != 200:
+        return {}
     time.sleep(0.1)
 
     if response.status_code == 200:
@@ -26,27 +58,6 @@ def get_fund_filings(cik: dir) -> dict:
     else: 
         print(f"Failed to fetch CIK {cik}: {response.status_code}")
         return {}
-
-
-def get_filing_index(accession_number: str, cik: str) -> dict:
-    """
-    Given an accession number, fetch the filing index to find
-    the actual XML holdings document URL.
-    """
-    # Format accession number for URL (remove dashes)
-    acc_formatted = accession_number.replace("-", "")
-    cik_padded = cik.zfill(10)
-
-    index_url = f"https://data.sec.gov/submissions/CIK{cik_padded}.json"
-    
-    doc_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc_formatted}/{accession_number}-index.htm"
-    
-    response = requests.get(doc_url, headers=HEADERS)
-    time.sleep(0.1)
-    
-    print("Index URL:", doc_url)
-    print("Status:", response.status_code)
-    return doc_url
 
 
 def get_holdings_xml_url(accession_number: str, cik: str) -> str:
@@ -59,7 +70,9 @@ def get_holdings_xml_url(accession_number: str, cik: str) -> str:
     
     index_url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc_formatted}/{accession_number}-index.htm"
     
-    response = requests.get(index_url, headers=HEADERS)
+    response = safe_get(index_url)
+    if response is None or response.status_code != 200:
+        return {}
     time.sleep(0.1)
 
     # Fina all XML files in the index page
@@ -86,7 +99,9 @@ def parse_holdings_xml(xml_url: str) -> pd.DataFrame:
     Each row = one stock holding.
     """
 
-    response = requests.get(xml_url, headers=HEADERS)
+    response = safe_get(xml_url)
+    if response is None or response.status_code != 200:
+        return {}
     time.sleep(0.1)
 
     # Parse XML
@@ -122,7 +137,9 @@ def parse_cover_page(accession_number: str, cik: str) -> dict:
     
     url = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc_formatted}/primary_doc.xml"
     
-    response = requests.get(url, headers=HEADERS)
+    response = safe_get(url)
+    if response is None or response.status_code != 200:
+        return {}
     time.sleep(0.1)
     
     if response.status_code != 200:
@@ -143,6 +160,9 @@ def parse_cover_page(accession_number: str, cik: str) -> dict:
         "included_managers_count": find_text("otherIncludedManagersCount"),
         "is_confidential_omitted": find_text("isConfidentialOmitted")
     }
+
+
+
 
 
 if __name__ == "__main__":
