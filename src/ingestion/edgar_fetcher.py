@@ -43,21 +43,33 @@ def safe_get(url: str, retries = 3) -> requests.Response:
 def get_fund_filings(cik: dir) -> dict:
     """
     Given a fund's CIK number, fetch all their SEC filings metadata.
-    CIK is the unique ID the SEC assigns to every filing entity.
+    Handles pagination for funds with large filing histories.
     """
     cik_padded = cik.zfill(10) # SEC requires 10-digit CIK
     url = f"https://data.sec.gov/submissions/CIK{cik_padded}.json"
 
     response = safe_get(url)
     if response is None or response.status_code != 200:
+        print(f"Failed to fetch CIK {cik}: {response.status_code if response else 'No response'}")
         return {}
     time.sleep(0.1)
 
-    if response.status_code == 200:
-        return response.json()
-    else: 
-        print(f"Failed to fetch CIK {cik}: {response.status_code}")
-        return {}
+    data = response.json()
+
+    # Check for additional paginated filing files
+    if "files" in data.get("filings", {}):
+        for file_info in data["filings"]["files"]:
+            file_url = f"https://data.sec.gov/submissions/{file_info['name']}"
+            file_response = safe_get(file_url)
+            if file_response and file_response.status_code == 200:
+                extra = file_response.json()
+                # Merge extra filings into recent
+                for key in data["filings"]["recent"]:
+                    if key in extra:
+                        data["filings"]["recent"][key].extend(extra[key])
+    
+    return data
+
 
 
 def get_holdings_xml_url(accession_number: str, cik: str) -> str:
