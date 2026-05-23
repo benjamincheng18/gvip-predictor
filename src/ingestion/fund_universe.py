@@ -2,6 +2,13 @@ import requests
 import pandas as pd
 import time
 import os
+import yaml
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.yaml")
+
+with open(CONFIG_PATH, "r") as f:
+    config = yaml.safe_load(f)
 
 
 HEADERS = {
@@ -56,13 +63,7 @@ def get_13f_filers_for_quarter(year: int, quarter: int) -> pd.DataFrame:
 if __name__ == "__main__":
     os.makedirs(os.path.join("data/raw/fund_universe"), exist_ok=True)
 
-    quarters_to_run = [
-        (2022, 1), (2022, 2), (2022, 3), (2022, 4),
-        (2023, 1), (2023, 2), (2023, 3), (2023, 4),
-        (2024, 1), (2024, 2), (2024, 3), (2024, 4),
-        (2025, 1), (2025, 2), (2025, 3), (2025, 4),
-        (2026, 1)
-    ]
+    quarters_to_run = [tuple(q) for q in config["pipeline"]["quarters_to_run"]]
 
     for year, quarter in quarters_to_run:
         output_path = f"data/raw/fund_universe/filers_{year}_Q{quarter}.csv"

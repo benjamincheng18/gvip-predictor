@@ -55,8 +55,9 @@ def get_fund_filings(cik: dir) -> dict:
     time.sleep(0.1)
 
     data = response.json()
-
-    # Check for additional paginated filing files
+    
+    # EDGAR paginates older filings for funds with long histories
+    # This merges paginated files to ensure we capture all quarters
     if "files" in data.get("filings", {}):
         for file_info in data["filings"]["files"]:
             file_url = f"https://data.sec.gov/submissions/{file_info['name']}"
