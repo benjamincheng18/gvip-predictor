@@ -10,24 +10,36 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 def load_security_filter() -> set:
     """
     Load valid CUSIPs from classification file.
-    Filters out ETFs, funds, bonds, and other non-equity securities.
+    Filters out ETFs, funds, bonds, FX instruments, and unclassified securities.
     """
     classifications_path = os.path.join(PROJECT_ROOT, "data/processed/cusip_classifications.csv")
-    
+
     if not os.path.exists(classifications_path):
         print("No classification file found — skipping ETF filter")
         return None
-    
+
     df = pd.read_csv(classifications_path)
-    
-    KEEP_TYPES = {"Common Stock", "ADR", "REIT", "MLP", "Unknown"}
-    
-    valid = df[df["security_type"].isin(KEEP_TYPES)]["cusip"].astype(str).unique()
-    filtered = df[~df["security_type"].isin(KEEP_TYPES)]["cusip"].astype(str).unique()
-    
+
+    # Exclude Unknown — GVIP-eligible stocks should be classifiable
+    KEEP_TYPES = {"Common Stock", "ADR", "REIT", "MLP"}
+
+    # Filter by security type
+    df_valid = df[df["security_type"].isin(KEEP_TYPES)].copy()
+
+    # Filter out FX tickers — currency codes appended to ticker
+    FX_SUFFIXES = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD"]
+    if "ticker" in df_valid.columns:
+        fx_mask = df_valid["ticker"].fillna("").apply(
+            lambda t: any(t.endswith(s) for s in FX_SUFFIXES) or len(t) > 5
+        )
+        df_valid = df_valid[~fx_mask]
+
+    valid = df_valid["cusip"].astype(str).unique()
+    filtered_count = len(df) - len(df_valid)
+
     print(f"Valid securities: {len(valid)}")
-    print(f"Filtered out: {len(filtered)}")
-    
+    print(f"Filtered out: {filtered_count}")
+
     return set(valid)
 
 def compute_crowding_features(holdings_df: pd.DataFrame, valid_cusips: set = None) -> pd.DataFrame:
@@ -129,17 +141,30 @@ def build_quarterly_features(data_dir: str) -> pd.DataFrame:
 if __name__ == "__main__":
     data_dir = os.path.join(PROJECT_ROOT, "data/raw")
     features_df = build_quarterly_features(data_dir)
-    
+
     # Save crowding features
     output_path = os.path.join(PROJECT_ROOT, "data/processed/crowding_features.csv")
     features_df.to_csv(output_path, index=False)
     print(f"\nSaved crowding features to {output_path}")
     print("Shape:", features_df.shape)
-    
-    # Save CUSIP -> ticker mapping for yfinance
-    classifications = pd.read_csv(os.path.join(PROJECT_ROOT, "data/processed/cusip_classifications.csv"))
-    ticker_map = classifications[["cusip", "ticker"]].dropna(subset=["ticker"])
-    ticker_map = ticker_map[ticker_map["ticker"] != ""]
+
+    # Save clean CUSIP -> ticker map using same filter logic
+    classifications = pd.read_csv(
+        os.path.join(PROJECT_ROOT, "data/processed/cusip_classifications.csv")
+    )
+
+    KEEP_TYPES = {"Common Stock", "ADR", "REIT", "MLP"}
+    FX_SUFFIXES = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD"]
+
+    ticker_map = classifications[classifications["security_type"].isin(KEEP_TYPES)].copy()
+    ticker_map = ticker_map[ticker_map["ticker"].notna() & (ticker_map["ticker"] != "")]
+    ticker_map = ticker_map[
+        ~ticker_map["ticker"].apply(
+            lambda t: any(t.endswith(s) for s in FX_SUFFIXES) or len(t) > 5
+        )
+    ]
+    ticker_map = ticker_map[["cusip", "ticker"]].drop_duplicates(subset=["cusip"])
+
     ticker_map_path = os.path.join(PROJECT_ROOT, "data/processed/cusip_ticker_map.csv")
     ticker_map.to_csv(ticker_map_path, index=False)
     print(f"Saved ticker map: {len(ticker_map)} CUSIP->ticker mappings")
