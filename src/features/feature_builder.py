@@ -131,7 +131,7 @@ if __name__ == "__main__":
     features_df = build_quarterly_features(data_dir)
     
     # Save to processed
-    output_path = os.path.join(PROJECT_ROOT, "data/processed/crowding_features.csv")
+    output_path = os.path.join(PROJECT_ROOT, "data/features/crowding_features.csv")
     features_df.to_csv(output_path, index=False)
     print(f"\nSaved to {output_path}")
     print("Shape:", features_df.shape)

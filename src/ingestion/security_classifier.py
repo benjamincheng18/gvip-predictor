@@ -60,7 +60,8 @@ def classify_cusips(cusips: list) -> pd.DataFrame:
                         "security_type": figi_data.get("securityType", ""),
                         "security_type2": figi_data.get("securityType2", ""),
                         "market_sector": figi_data.get("marketSector", ""),
-                        "name": figi_data.get("name", "")
+                        "name": figi_data.get("name", ""),
+                        "ticker": figi_data.get("ticker", "")
                     })
                 else:
                     results.append({
@@ -68,7 +69,8 @@ def classify_cusips(cusips: list) -> pd.DataFrame:
                         "security_type": "Unknown",
                         "security_type2": "",
                         "market_sector": "",
-                        "name": ""
+                        "name": "", 
+                        "ticker": ""
                     })
         
         except Exception as e:

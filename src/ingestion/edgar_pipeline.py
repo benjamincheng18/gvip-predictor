@@ -156,6 +156,12 @@ if __name__ == "__main__":
     quarters_to_run = [tuple(q) for q in config["pipeline"]["quarters_to_run"]]
 
     for year, quarter in quarters_to_run:
+        holdings_path = os.path.join(PROJECT_ROOT, "data", "raw", f"holdings_{year}_Q{quarter}.csv")
+
+        if not os.path.exists(holdings_path):
+            logger.warning("Holdings file not found, skipping: %s", holdings_path)
+            continue
+        
         print(f"\n{'='*40}")
         print(f"Processing {year} Q{quarter}")
         print(f"{'='*40}")
