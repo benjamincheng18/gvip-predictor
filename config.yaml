@@ -35,3 +35,6 @@ pipeline:
 
 edgar:
   user_agent: "gvip-predictor bencheng18@gmail.com"
+
+openfigi:
+  openfigi_api_key: "109d80b6-4673-46b4-bf6b-cb3666c9be82"

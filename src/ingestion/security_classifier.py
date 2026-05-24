@@ -3,11 +3,19 @@ import pandas as pd
 import time
 import os
 import sys
+import yaml
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.yaml")
+
+with open(CONFIG_PATH, "r") as f:
+    config = yaml.safe_load(f)
 
 OPENFIGI_URL = "https://api.openfigi.com/v3/mapping"
-HEADERS = {"Content-Type": "application/json"}
+OPENFIGI_HEADERS = {
+    "Content-Type": "application/json",
+    "X-OPENFIGI-APIKEY": config['openfigi']['openfigi_api_key']
+}
 
 
 def classify_cusips(cusips: list) -> pd.DataFrame:
@@ -29,13 +37,13 @@ def classify_cusips(cusips: list) -> pd.DataFrame:
         payload = [{"idType": "ID_CUSIP", "idValue": cusip} for cusip in batch]
         
         try:
-            response = requests.post(OPENFIGI_URL, json=payload, headers=HEADERS, timeout=10)
+            response = requests.post(OPENFIGI_URL, json=payload, headers=OPENFIGI_HEADERS, timeout=10)
             time.sleep(1.0)  # increased sleep
             
             if response.status_code == 429:  # rate limited
                 print("Rate limited, waiting 60s...")
                 time.sleep(60)
-                response = requests.post(OPENFIGI_URL, json=payload, headers=HEADERS, timeout=10)
+                response = requests.post(OPENFIGI_URL, json=payload, headers=OPENFIGI_HEADERS, timeout=10)
             
             if response.status_code != 200:
                 print(f"OpenFIGI error {response.status_code} on batch {i//50 + 1}")
@@ -83,16 +91,17 @@ if __name__ == "__main__":
         df = pd.read_csv(f, low_memory=False)
         all_cusips.update(df["cusip"].dropna().unique())
     
-    output_path = os.path.join(PROJECT_ROOT, "data/processed/cusip_classifications.csv")
+    output_path = os.path.join(PROJECT_ROOT, "data/processed/cusip_classifications.csv")    
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
     # Checkpointing — skip already classified CUSIPs
-    if os.path.exists(output_path):
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
         existing = pd.read_csv(output_path)
         already_done = set(existing["cusip"].astype(str).unique())
         print(f"Already classified: {len(already_done)}")
     else:
         already_done = set()
+        print("Starting fresh")
     
     remaining_cusips = [c for c in all_cusips if c not in already_done]
     print(f"Remaining to classify: {len(remaining_cusips)}")

@@ -7,7 +7,30 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-def compute_crowding_features(holdings_df: pd.DataFrame) -> pd.DataFrame:
+def load_security_filter() -> set:
+    """
+    Load valid CUSIPs from classification file.
+    Filters out ETFs, funds, bonds, and other non-equity securities.
+    """
+    classifications_path = os.path.join(PROJECT_ROOT, "data/processed/cusip_classifications.csv")
+    
+    if not os.path.exists(classifications_path):
+        print("No classification file found — skipping ETF filter")
+        return None
+    
+    df = pd.read_csv(classifications_path)
+    
+    KEEP_TYPES = {"Common Stock", "ADR", "REIT", "MLP", "Unknown"}
+    
+    valid = df[df["security_type"].isin(KEEP_TYPES)]["cusip"].astype(str).unique()
+    filtered = df[~df["security_type"].isin(KEEP_TYPES)]["cusip"].astype(str).unique()
+    
+    print(f"Valid securities: {len(valid)}")
+    print(f"Filtered out: {len(filtered)}")
+    
+    return set(valid)
+
+def compute_crowding_features(holdings_df: pd.DataFrame, valid_cusips: set = None) -> pd.DataFrame:
     """
     Given raw holdings for one quarter, compute stock-level crowding features.
     
@@ -17,6 +40,12 @@ def compute_crowding_features(holdings_df: pd.DataFrame) -> pd.DataFrame:
     - avg_portfolio_weight: average weight of stock across all holding funds
     - avg_rank: average rank of stock within holding funds' portfolios
     """
+    # Filter out ETFs if classification data available
+    if valid_cusips is not None:
+        before = len(holdings_df)
+        holdings_df = holdings_df[holdings_df["cusip"].astype(str).isin(valid_cusips)]
+        print(f"  ETF filter: {before} → {len(holdings_df)} rows")
+    
     results = []
 
     # Process each fund seperately
@@ -59,6 +88,9 @@ def build_quarterly_features(data_dir: str) -> pd.DataFrame:
     """
     import glob
 
+    # Load security filter once
+    valid_cusips = load_security_filter()
+
     files = sorted(glob.glob(os.path.join(data_dir, "holdings_*.csv")))
 
     quarterly_features = []
@@ -73,7 +105,7 @@ def build_quarterly_features(data_dir: str) -> pd.DataFrame:
         print(f"Computing features for {year} Q{quarter}...")
 
         df = pd.read_csv(f, low_memory=False)
-        features = compute_crowding_features(df)
+        features = compute_crowding_features(df, valid_cusips)
         features['year'] = year
         features['quarter'] = quarter
         features['quarter_id'] = f"{year}_Q{quarter}"
@@ -98,6 +130,14 @@ if __name__ == "__main__":
     data_dir = os.path.join(PROJECT_ROOT, "data/raw")
     features_df = build_quarterly_features(data_dir)
     
-    print("\nShape:", features_df.shape)
-    print("\nSample:")
-    print(features_df[features_df["cusip"] == "037833100"])  # Apple
+    # Save to processed
+    output_path = os.path.join(PROJECT_ROOT, "data/processed/crowding_features.csv")
+    features_df.to_csv(output_path, index=False)
+    print(f"\nSaved to {output_path}")
+    print("Shape:", features_df.shape)
+    
+    # Check Apple
+    print("\nApple across quarters:")
+    print(features_df[features_df["cusip"] == "037833100"][
+        ["quarter_id", "total_holders", "top10_count", "holders_qoq"]
+    ])
