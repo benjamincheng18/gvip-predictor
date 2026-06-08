@@ -33,6 +33,7 @@ pipeline:
     - [2025, 4]
     - [2026, 1]
 
+
 edgar:
   user_agent: "gvip-predictor bencheng18@gmail.com"
 
