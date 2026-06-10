@@ -89,6 +89,8 @@ Crowding features account for ~74% of model importance, validating the 13F-based
 ---
 
 ## Project Structure
+
+````text
 gvip-predictor/
 ├── src/
 │   ├── ingestion/
@@ -112,6 +114,7 @@ gvip-predictor/
 ├── config.yaml                     # Pipeline parameters
 ├── requirements.txt
 └── README.md
+````
 
 ---
 
