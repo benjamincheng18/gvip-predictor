@@ -11,10 +11,12 @@ CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.yaml")
 with open(CONFIG_PATH, "r") as f:
     config = yaml.safe_load(f)
 
+from dotenv import load_dotenv
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 OPENFIGI_URL = "https://api.openfigi.com/v3/mapping"
 OPENFIGI_HEADERS = {
     "Content-Type": "application/json",
-    "X-OPENFIGI-APIKEY": config['openfigi']['openfigi_api_key']
+    "X-OPENFIGI-APIKEY": os.getenv("OPENFIGI_API_KEY")
 }
 
 

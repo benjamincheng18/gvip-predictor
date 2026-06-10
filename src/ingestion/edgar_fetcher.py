@@ -5,14 +5,15 @@ import pandas as pd
 from lxml import etree
 import yaml
 import os
-
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.yaml")
 
 with open(CONFIG_PATH, "r") as f:
     config = yaml.safe_load(f)
 
-HEADERS = {"User-Agent": config["edgar"]["user_agent"]}
+from dotenv import load_dotenv
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+HEADERS = {"User-Agent": os.getenv("EDGAR_USER_AGENT")}
 TIMEOUT = config["pipeline"]["request_timeout"]
 
 

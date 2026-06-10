@@ -33,13 +33,6 @@ pipeline:
     - [2025, 4]
     - [2026, 1]
 
-
-edgar:
-  user_agent: "gvip-predictor bencheng18@gmail.com"
-
-openfigi:
-  openfigi_api_key: "109d80b6-4673-46b4-bf6b-cb3666c9be82"
-
 yfinance: 
   max_workers: 4
   sleep_per_ticker: 0.3
