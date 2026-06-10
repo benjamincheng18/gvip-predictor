@@ -220,3 +220,6 @@ __marimo__/
 data/raw/
 data/processed/
 data/features/
+
+__pycache__/
+*.pyc
