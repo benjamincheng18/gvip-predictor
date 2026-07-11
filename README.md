@@ -50,22 +50,25 @@ Class imbalance handled via `scale_pos_weight` (~66:1 negative to positive ratio
 
 ## Results
 
-### Model Performance
-| Dataset | AUC | Precision | Recall |
+### Ablation Study
+
+Two models were trained to honestly assess signal sources:
+
+| Model | Val AUC | Test AUC | Top-50 Precision |
 |---|---|---|---|
-| Train | 0.9992 | 0.546 | 1.000 |
-| Validation | 0.9994 | 0.493 | 0.990 |
-| Test | 0.9989 | 0.429 | 1.000 |
+| Full (crowding + technical) | 0.9994 | 0.9989 | 100% (50/50) |
+| Technical only (no crowding) | 0.8970 | 0.8917 | 68% (34/50) |
 
-### Top-50 Precision
-| Dataset | Correct predictions | Precision |
-|---|---|---|
-| Validation | 50/50 | 1.000 |
-| Test | 50/50 | 1.000 |
+**Interpretation:**
 
-The model's top-50 ranked predictions perfectly match actual GVIP constituents on both validation and test sets.
+The full model's near-perfect performance is primarily driven by **crowding persistence** — stocks heavily owned by hedge funds this quarter tend to remain heavily owned next quarter. This is a real and exploitable signal, but not a surprising one.
 
-### Backtest (2025 Q3)
+The more credible result is the **technical-only model**: using only price-based indicators (momentum, trend, volatility, volume, RSI, Bollinger Bands, MACD), the model correctly identifies **34 of 50 actual GVIP constituents** — well above the random baseline of ~2-3 correct picks from a universe of 5,800+ stocks.
+
+The gap between 100% and 68% top-50 precision quantifies the pure persistence contribution of crowding features.
+
+### Backtest (2025 Q3, Full Model)
+
 | Metric | Value |
 |---|---|
 | Overlap with actual GVIP | 43/50 (86%) |
@@ -74,17 +77,17 @@ The model's top-50 ranked predictions perfectly match actual GVIP constituents o
 | Universe return | +1.68% |
 | **Alpha vs universe** | **+1.47%** |
 
-### Feature Importance
+### Feature Importance (Full Model)
+
 | Feature | Importance |
 |---|---|
 | `top10_count` | 55.5% |
 | `total_holders` | 13.9% |
 | `dollar_volume` | 7.8% |
 | `total_value` | 5.0% |
-| `avg_rank` | 2.2% |
 | `rsi_14` | 2.0% |
 
-Crowding features account for ~74% of model importance, validating the 13F-based approach.
+Crowding features account for ~74% of importance, confirming that persistence is the dominant signal. Technical indicators contribute the remaining ~26%, providing independent predictive power as demonstrated by the technical-only ablation.
 
 ---
 

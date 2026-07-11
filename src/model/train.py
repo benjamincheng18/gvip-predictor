@@ -30,6 +30,16 @@ FEATURE_COLS = [
     "macd_histogram"
 ]
 
+# Technical-only feature set (no crowding features)
+TECHNICAL_ONLY_COLS = [
+    "return_1m", "return_3m", "return_6m", "return_12m",
+    "ma50_ratio", "ma200_ratio", "high52w_ratio",
+    "volatility_3m", "volatility_ratio",
+    "rel_volume", "dollar_volume",
+    "rsi_14", "bollinger_position",
+    "macd_histogram"
+]
+
 # Train/validation/test split by quarter_idx
 # 25 quarters total (idx 0-24)
 # Train: idx 0-19 (2020 Q1 - 2024 Q4)
@@ -162,14 +172,82 @@ def train_model(df: pd.DataFrame):
 
     return model, importance
 
+def train_model_ablation(df: pd.DataFrame):
+    """
+    Train two models:
+    - Model A: full features (crowding + technical)
+    - Model B: technical only (no crowding features)
+    
+    This tests whether performance collapses without crowding features,
+    honestly framing the persistence signal vs genuine alpha.
+    """
+    train, val, test = split_data(df)
+
+    results = {}
+
+    for name, features in [
+        ("Full (crowding + technical)", FEATURE_COLS),
+        ("Technical only (no crowding)", TECHNICAL_ONLY_COLS)
+    ]:
+        print(f"\n{'='*50}")
+        print(f"Model: {name}")
+        print(f"{'='*50}")
+
+        X_train = train[features]
+        y_train = train["target"]
+        X_val = val[features]
+        y_val = val["target"]
+        X_test = test[features]
+        y_test = test["target"]
+
+        neg = (y_train == 0).sum()
+        pos = (y_train == 1).sum()
+        scale_pos_weight = neg / pos
+
+        model = xgb.XGBClassifier(
+            n_estimators=500,
+            max_depth=4,
+            learning_rate=0.05,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            scale_pos_weight=scale_pos_weight,
+            eval_metric="auc",
+            early_stopping_rounds=30,
+            random_state=42,
+            n_jobs=-1
+        )
+
+        model.fit(
+            X_train, y_train,
+            eval_set=[(X_val, y_val)],
+            verbose=False
+        )
+
+        val_auc = evaluate(model, X_val, y_val, f"Validation ({name})")
+        test_auc = evaluate(model, X_test, y_test, f"Test ({name})")
+        evaluate_topk(model, X_val, y_val, k=50, label=f"Val Top-50 ({name})")
+        evaluate_topk(model, X_test, y_test, k=50, label=f"Test Top-50 ({name})")
+
+        results[name] = {
+            "val_auc": val_auc,
+            "test_auc": test_auc,
+            "model": model
+        }
+
+    return results
 
 if __name__ == "__main__":
-    # Install xgboost if needed
     df = load_feature_matrix()
-    model, importance = train_model(df)
+    results = train_model_ablation(df)
 
-    # Save model
+    print("\n── Ablation Summary ──────────────────")
+    for name, r in results.items():
+        print(f"{name}:")
+        print(f"  Val AUC:  {r['val_auc']:.4f}")
+        print(f"  Test AUC: {r['test_auc']:.4f}")
+
+    # Save full model
     model_path = os.path.join(PROJECT_ROOT, "data/features/gvip_model.pkl")
     with open(model_path, "wb") as f:
-        pickle.dump(model, f)
-    print(f"\nModel saved to {model_path}")
+        pickle.dump(results["Full (crowding + technical)"]["model"], f)
+    print(f"\nFull model saved to {model_path}")
