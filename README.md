@@ -1,190 +1,156 @@
-# GVIP Predictor
-
-A machine learning pipeline that predicts which stocks will appear in the **Goldman Sachs Hedge Fund VIP Index (GVIP)** next quarter, based on SEC 13F filings analysis and technical indicators.
-
----
+# Hedge Fund Crowding Ranker
+Inspired by the construction methodology behind Goldman Sachs' Hedge Fund VIP (GVIP) portfolio.
 
 ## Overview
 
-The Goldman Sachs Hedge Fund VIP Index tracks the 50 stocks that appear most frequently in the top-10 holdings of fundamentally-driven hedge funds, rebalanced quarterly. This project replicates and predicts the index construction process using publicly available SEC 13F filings and price data.
+Institutional investors often exhibit persistent crowding in a relatively small set of stocks. Inspired by Goldman Sachs' Hedge Fund VIP (GVIP) portfolio, this project investigates whether publicly available SEC 13F filings can be used to rank stocks that are likely to become the next quarter's most crowded hedge fund positions.
 
-**Key question:** Given hedge fund holdings data and technical indicators from this quarter, which 50 stocks will appear in GVIP next quarter?
+Rather than attempting to replicate the proprietary GVIP index, this project formulates the problem as a supervised machine learning ranking task using quarterly hedge fund ownership features together with technical market indicators.
 
----
+**Given this quarter’s hedge-fund crowding data and technical indicators, which stocks are most likely to appear in next quarter’s crowding top 50?**
 
-## Methodology
+This is not an exact replication of the GVIP index. Instead, it is a proxy-ranking problem built from public data.
 
-### 1. Data Collection
-- **SEC EDGAR API** — directly fetches 13F filings (no third-party wrappers) for all funds filing with $1B+ AUM and 10–200 distinct equity positions across 25 quarters (2020 Q1 → 2026 Q1)
-- **OpenFIGI API** — classifies securities by type, filtering out ETFs, funds, and bonds
-- **yfinance** — fetches full price history for technical indicator computation
+## What the model predicts
 
-### 2. Feature Engineering
-**Crowding features (from 13F filings):**
-- `top10_count` — number of funds holding stock in top-10 positions
-- `total_holders` — total number of qualifying funds holding the stock
-- `top10_ratio` — fraction of holders with stock in top-10
-- `avg_portfolio_weight` — average portfolio weight across holders
-- Quarter-over-quarter changes for all metrics
+A stock is labeled `1` if it appears in the **top 50 by hedge-fund top-10 appearances in the next quarter**.
+That label is used as a practical proxy for next-quarter crowding strength.
 
-**Technical indicators (point-in-time, no look-ahead bias):**
-- Momentum: 1M, 3M, 6M, 12M returns
-- Trend: 50-day/200-day MA ratio, 52-week high ratio
-- Volatility: 3M realized volatility, volatility ratio
-- Volume: relative volume, dollar volume
-- Mean reversion: RSI-14, Bollinger Band position
-- MACD histogram
+## Data sources
 
-### 3. Target Variable
-A stock is labeled `1` if it appears in the **top 50 stocks by hedge fund top-10 appearances** in the next quarter — our proxy for GVIP index membership.
+* **SEC EDGAR 13F filings** for fund holdings
+* **OpenFIGI** for security classification and ticker mapping
+* **yfinance** for historical prices and technical indicators
 
-### 4. Model
-**XGBoost classifier** with walk-forward validation:
-- Train: 2020 Q1 → 2024 Q4 (20 quarters)
-- Validation: 2025 Q1 → 2025 Q2 (2 quarters)
-- Test: 2025 Q3 → 2025 Q4 (2 quarters)
+## Features
 
-Class imbalance handled via `scale_pos_weight` (~66:1 negative to positive ratio).
+### Crowding features
 
----
+From 13F filings, the pipeline builds features such as:
 
-## Results
+* `total_holders`
+* `top10_count`
+* `top10_ratio`
+* `avg_portfolio_weight`
+* quarter-over-quarter changes in crowding measures
 
-### Ablation Study
+### Technical features
 
-Two models were trained to honestly assess signal sources:
+Point-in-time market features include:
 
-| Model | Val AUC | Test AUC | Top-50 Precision |
-|---|---|---|---|
-| Full (crowding + technical) | 0.9994 | 0.9989 | 100% (50/50) |
-| Technical only (no crowding) | 0.8970 | 0.8917 | 68% (34/50) |
+* 1M / 3M / 6M / 12M returns
+* moving-average ratios
+* 52-week high ratio
+* realized volatility
+* relative volume
+* dollar volume
+* RSI
+* Bollinger Band position
+* MACD histogram
 
-**Interpretation:**
+## Model
 
-The full model's near-perfect performance is primarily driven by **crowding persistence** — stocks heavily owned by hedge funds this quarter tend to remain heavily owned next quarter. This is a real and exploitable signal, but not a surprising one.
+The main model is an **XGBoost classifier** with walk-forward validation.
 
-The more credible result is the **technical-only model**: using only price-based indicators (momentum, trend, volatility, volume, RSI, Bollinger Bands, MACD), the model correctly identifies **34 of 50 actual GVIP constituents** — well above the random baseline of ~2-3 correct picks from a universe of 5,800+ stocks.
+The project compares:
 
-The gap between 100% and 68% top-50 precision quantifies the pure persistence contribution of crowding features.
+* a **full model** using crowding + technical features
+* a **technical-only model** with crowding features removed
 
-### Backtest (2025 Q3, Full Model)
+This ablation is intentional: it separates persistence in hedge-fund ownership from signal coming from market data.
 
-| Metric | Value |
-|---|---|
-| Overlap with actual GVIP | 43/50 (86%) |
-| Predicted portfolio return | +3.15% |
-| Actual GVIP return | +8.72% |
-| Universe return | +1.68% |
-| **Alpha vs universe** | **+1.47%** |
+## Evaluation
 
-### Feature Importance (Full Model)
+The model is evaluated with:
 
-| Feature | Importance |
-|---|---|
-| `top10_count` | 55.5% |
-| `total_holders` | 13.9% |
-| `dollar_volume` | 7.8% |
-| `total_value` | 5.0% |
-| `rsi_14` | 2.0% |
+* AUC
+* precision / recall / F1
+* top-50 precision
+* quarterly backtest overlap
+* forward return comparison for predicted vs actual portfolios
 
-Crowding features account for ~74% of importance, confirming that persistence is the dominant signal. Technical indicators contribute the remaining ~26%, providing independent predictive power as demonstrated by the technical-only ablation.
+## Repository structure
 
----
+```text
+src/
+├── ingestion/
+│   ├── edgar_fetcher.py
+│   ├── edgar_pipeline.py
+│   ├── fund_universe.py
+│   ├── security_classifier.py
+│   ├── yfinance_fetcher.py
+│   └── yfinance_pipeline.py
+├── features/
+│   ├── feature_builder.py
+│   └── merge_features.py
+└── model/
+    ├── train.py
+    └── backtest.py
 
-## Project Structure
-
-````text
-gvip-predictor/
-├── src/
-│   ├── ingestion/
-│   │   ├── edgar_fetcher.py        # SEC EDGAR API — 13F XML parsing
-│   │   ├── edgar_pipeline.py       # Parallel ingestion pipeline with checkpointing
-│   │   ├── fund_universe.py        # Quarterly 13F filer universe construction
-│   │   ├── security_classifier.py  # OpenFIGI CUSIP classification
-│   │   ├── yfinance_fetcher.py     # Technical indicator computation
-│   │   └── yfinance_pipeline.py    # Price cache and feature pipeline
-│   ├── features/
-│   │   ├── feature_builder.py      # Crowding feature engineering
-│   │   └── merge_features.py       # Feature matrix construction + target variable
-│   └── model/
-│       ├── train.py                # XGBoost training + walk-forward evaluation
-│       └── backtest.py             # Quarterly backtest + portfolio return simulation
-├── data/
-│   ├── raw/                        # 13F holdings CSVs (gitignored)
-│   ├── processed/                  # Cleaned features, classifications (gitignored)
-│   └── features/                   # Final feature matrix, model (gitignored)
-├── notebooks/                      # EDA and data inspection
-├── config.yaml                     # Pipeline parameters
-├── requirements.txt
-└── README.md
-````
-
----
-
-## Setup
-
-**Prerequisites:** Python 3.11, Homebrew (Mac)
-
-**1. Clone the repository:**
-```bash
-git clone https://github.com/benjamincheng18/gvip-predictor.git
-cd gvip-predictor
+main.py
+config.yaml
+requirements.txt
 ```
 
-**2. Create virtual environment:**
+## How to run
+
+### 1. Install dependencies
+
 ```bash
 python3.11 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-**3. Configure API keys:**
+### 2. Configure environment variables
+
+Create a `.env` file with your EDGAR user agent and OpenFIGI API key.
+
+### 3. Run the pipeline
+
+Run everything:
+
 ```bash
-cp .env.example .env
-```
-Edit `.env` with your credentials:
-EDGAR_USER_AGENT=your-project your@email.com
-OPENFIGI_API_KEY=your_openfigi_key
-
-**4. Run the pipeline (in order):**
-```bash
-# Step 1 — Build fund universe
-python3.11 src/ingestion/fund_universe.py
-
-# Step 2 — Collect 13F holdings (runs overnight)
-nohup python3.11 -u src/ingestion/edgar_pipeline.py > pipeline.log 2>&1 &
-
-# Step 3 — Classify securities
-python3.11 src/ingestion/security_classifier.py
-
-# Step 4 — Cache prices and compute technical features
-python3.11 src/ingestion/yfinance_pipeline.py
-
-# Step 5 — Build feature matrix
-python3.11 src/features/feature_builder.py
-python3.11 src/features/merge_features.py
-
-# Step 6 — Train model and backtest
-python3.11 src/model/train.py
-python3.11 src/model/backtest.py
+python3.11 main.py --step all
 ```
 
----
+Run one stage at a time:
 
-## Known Limitations
+```bash
+python3.11 main.py --step ingest
+python3.11 main.py --step features
+python3.11 main.py --step train
+```
 
-- **13F filing lag** — filings are due 45 days after quarter-end, so predictions are based on data that is 45–135 days old by the time the next quarter begins
-- **$1B AUM threshold** — uses a higher threshold than GS's $100M to reduce noise from wealth managers; configurable in `config.yaml`
-- **Fundamental features excluded** — yfinance only provides ~5 recent quarters of financials, making point-in-time fundamental features infeasible without paid data
-- **Single backtest quarter** — limited test period due to data availability; results should be interpreted cautiously
-- **Ticker mapping errors** — OpenFIGI occasionally returns incorrect tickers for some CUSIPs (e.g. MELI mapped as MLB1)
-- **Bear market inconsistency** — fewer funds qualify during 2020–2022 due to lower AUM from market drawdowns, creating inconsistency in training data
+## Results
 
----
+| Experiment               | Result      |
+| ------------------------ | ----------- |
+| Full Model               | AUC ≈ 0.999 |
+| Technical Only           | AUC ≈ 0.89  |
+| Top-50 Precision         | 100%        |
+| Average Crowding Overlap | 87%         |
 
-## Technologies
+The full model demonstrates that hedge fund crowding exhibits strong quarter-to-quarter persistence. Removing crowding features substantially reduces predictive performance, indicating that technical indicators alone capture only part of the signal.
 
-- **Python 3.11** — pandas, numpy, xgboost, scikit-learn, yfinance, lxml
-- **SEC EDGAR API** — free, no authentication required
-- **OpenFIGI API** — free tier, CUSIP security classification
-- **yfinance** — price history and technical indicator computation
+## Key Findings
+
+• Hedge fund crowding is highly persistent across quarters.
+
+• Historical ownership features contribute substantially more predictive power than technical indicators alone.
+
+• Technical indicators still provide incremental predictive information, achieving approximately 0.89 AUC without ownership features.
+
+• Public SEC filings can effectively model institutional crowding despite reporting delays.
+
+## Future Work
+
+- Compare against a naive persistence baseline.
+- Explore LightGBM and CatBoost.
+- Extend the backtest over additional market cycles.
+- Investigate SHAP values for feature interpretability.
+- Evaluate portfolio construction methods beyond Top-50 ranking.
+
+## Project goal
+
+This project is best understood as a practical ranking system for hedge-fund crowding, with GVIP construction as the inspiration for the target design.

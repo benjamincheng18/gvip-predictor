@@ -29,17 +29,19 @@ def load_model():
         return pickle.load(f)
 
 
-def run_backtest(df: pd.DataFrame, model, test_start_idx: int = 22) -> pd.DataFrame:
-    """
-    Run quarterly backtest on test set.
-    For each quarter, predict top-50 stocks and measure overlap
-    with actual GVIP proxy (actual top-50 by top10_count next quarter).
-    """
-    results = []
+def run_backtest(df: pd.DataFrame, model, test_start_idx: int | None = None) -> pd.DataFrame:
+    if test_start_idx is None:
+        quarter_idxs = sorted(df["quarter_idx"].dropna().unique())
+        if len(quarter_idxs) < 3:
+            raise ValueError("Need at least 3 quarters for backtesting.")
+        test_start_idx = quarter_idxs[-3]
 
-    test_quarters = df[df["quarter_idx"] >= test_start_idx][
-        ["year", "quarter", "quarter_idx"]
-    ].drop_duplicates().sort_values("quarter_idx")
+    results = []
+    test_quarters = (
+        df[df["quarter_idx"] >= test_start_idx][["year", "quarter", "quarter_idx"]]
+        .drop_duplicates()
+        .sort_values("quarter_idx")
+    )
 
     for _, row in test_quarters.iterrows():
         year = int(row["year"])
@@ -55,17 +57,14 @@ def run_backtest(df: pd.DataFrame, model, test_start_idx: int = 22) -> pd.DataFr
         # Get predictions
         X = current[FEATURE_COLS]
         current["proba"] = model.predict_proba(X)[:, 1]
-
         # Top-50 predicted stocks
         top50_predicted = set(
             current.nlargest(50, "proba")["cusip"].tolist()
         )
-
         # Actual GVIP proxy — top-50 by top10_count in NEXT quarter
         next_quarter = df[df["quarter_idx"] == q_idx + 1]
         if next_quarter.empty:
             continue
-
         top50_actual = set(
             next_quarter.nlargest(50, "top10_count")["cusip"].tolist()
         )
@@ -94,10 +93,6 @@ def run_backtest(df: pd.DataFrame, model, test_start_idx: int = 22) -> pd.DataFr
 
 
 def get_forward_return(ticker: str, from_date: str, to_date: str) -> float:
-    """
-    Compute forward return for a ticker between two dates.
-    Uses cached price data.
-    """
     price_cache_dir = os.path.join(PROJECT_ROOT, "data", "processed", "yfinance", "prices")
     cache_path = os.path.join(price_cache_dir, f"{ticker}.csv")
 
@@ -127,15 +122,25 @@ def get_forward_return(ticker: str, from_date: str, to_date: str) -> float:
         return None
 
 
+def quarter_end_date(year: int, quarter: int) -> str:
+    return {
+        1: f"{year}-03-31",
+        2: f"{year}-06-30",
+        3: f"{year}-09-30",
+        4: f"{year}-12-31",
+    }[quarter]
+
+
+def next_quarter(year: int, quarter: int) -> tuple[int, int]:
+    if quarter == 4:
+        return year + 1, 1
+    return year, quarter + 1
+
+
 def compute_portfolio_returns(
     backtest_results: pd.DataFrame,
     df: pd.DataFrame,
-    quarter_dates: dict
 ) -> pd.DataFrame:
-    """
-    Compute forward returns for predicted vs actual GVIP portfolios.
-    quarter_dates: maps quarter_label to (start_date, end_date) tuple
-    """
     ticker_map = pd.read_csv(
         os.path.join(PROJECT_ROOT, "data/processed/cusip_ticker_map.csv")
     )
@@ -145,10 +150,11 @@ def compute_portfolio_returns(
 
     for _, row in backtest_results.iterrows():
         qlabel = row["quarter_label"]
-        if qlabel not in quarter_dates:
-            continue
+        year, quarter = map(int, qlabel.split(" Q"))
 
-        from_date, to_date = quarter_dates[qlabel]
+        from_date = quarter_end_date(year, quarter)
+        next_year, next_q = next_quarter(year, quarter)
+        to_date = quarter_end_date(next_year, next_q)
 
         # Compute forward returns for predicted portfolio
         pred_returns = []
@@ -194,7 +200,7 @@ def compute_portfolio_returns(
             "actual_gvip_return": actual_return,
             "universe_return": universe_return,
             "alpha_vs_universe": (pred_return - universe_return)
-                if pred_return and universe_return else None,
+                if pred_return is not None and universe_return is not None else None,
             "n_predicted_with_data": len(pred_returns),
             "n_actual_with_data": len(actual_returns),
         })
@@ -213,25 +219,26 @@ if __name__ == "__main__":
     print("Running backtest on test set")
     print("=" * 40)
 
-    backtest_df = run_backtest(df, model, test_start_idx=22)
+    backtest_df = run_backtest(df, model)
 
     print("\n── Summary ──────────────────")
     print(f"Avg overlap:   {backtest_df['overlap'].mean():.1f}/50")
     print(f"Avg precision: {backtest_df['precision'].mean():.4f}")
     print(f"Avg recall:    {backtest_df['recall'].mean():.4f}")
 
-    # Quarter forward return periods
-    # From quarter-end to next quarter-end
-    quarter_dates = {
-        "2025 Q3": ("2025-09-30", "2025-12-31"),
-        "2025 Q4": ("2025-12-31", "2026-03-31"),
-    }
-
     print("\n── Portfolio Forward Returns ──────────────────")
-    returns_df = compute_portfolio_returns(backtest_df, df, quarter_dates)
-    print(returns_df[["quarter_label", "predicted_return", "actual_gvip_return",
-                       "universe_return", "alpha_vs_universe",
-                       "n_predicted_with_data"]].to_string(index=False))
+    returns_df = compute_portfolio_returns(backtest_df, df)
+
+    print(
+        returns_df[[
+            "quarter_label",
+            "predicted_return",
+            "actual_gvip_return",
+            "universe_return",
+            "alpha_vs_universe",
+            "n_predicted_with_data",
+        ]].to_string(index=False)
+    )
 
     print(f"\nAvg predicted return:   {returns_df['predicted_return'].mean():.4f}")
     print(f"Avg actual GVIP return: {returns_df['actual_gvip_return'].mean():.4f}")

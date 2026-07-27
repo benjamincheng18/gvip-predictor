@@ -1,7 +1,8 @@
-import pandas as pd
-import numpy as np
-import os
 import glob
+import os
+
+import numpy as np
+import pandas as pd
 import yaml
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -11,98 +12,129 @@ with open(CONFIG_PATH, "r") as f:
     config = yaml.safe_load(f)
 
 
-def build_feature_matrix() -> pd.DataFrame:
-    """
-    Merge crowding features and technical features per quarter.
-    Constructs target variable: in_gvip_next_quarter.
-    
-    Target = 1 if stock is in top 50 by top10_count in the NEXT quarter.
-    This proxies GVIP index membership based on GS's methodology.
-    """
-
-    # Load crowding features
-    crowding_path = os.path.join(PROJECT_ROOT, "data/processed/crowding_features.csv")
-    crowding = pd.read_csv(crowding_path, low_memory=False)
-    print(f"Crowding features: {crowding.shape}")
-
-    # Load ticker map
-    ticker_map_path = os.path.join(PROJECT_ROOT, "data/processed/cusip_ticker_map.csv")
-    ticker_map = pd.read_csv(ticker_map_path)
-
-    # Merge ticker into crowding features
-    crowding = crowding.merge(ticker_map, on="cusip", how="left")
-    tech_files = sorted(glob.glob(
-        os.path.join(PROJECT_ROOT, "data/processed/yfinance/technical_*.csv")
-    ))
+def _load_technical_features() -> pd.DataFrame:
+    tech_files = sorted(
+        glob.glob(os.path.join(PROJECT_ROOT, "data/processed/yfinance/technical_*.csv"))
+    )
+    if not tech_files:
+        raise FileNotFoundError(
+            "No technical feature files found under data/processed/yfinance/"
+        )
 
     tech_dfs = []
-    for f in tech_files:
-        basename = os.path.basename(f)
+    for file_path in tech_files:
+        basename = os.path.basename(file_path)
         parts = basename.replace("technical_", "").replace(".csv", "").split("_")
+        if len(parts) != 2 or not parts[1].startswith("Q"):
+            raise ValueError(f"Unexpected technical file name: {basename}")
+
         year = int(parts[0])
         quarter = int(parts[1].replace("Q", ""))
 
-        df = pd.read_csv(f)
+        df = pd.read_csv(file_path, low_memory=False)
         df["year"] = year
         df["quarter"] = quarter
         tech_dfs.append(df)
 
     tech_all = pd.concat(tech_dfs, ignore_index=True)
+
+    # Ensure one row per ticker-year-quarter before merging.
+    tech_all = tech_all.sort_values(["ticker", "year", "quarter"]).drop_duplicates(
+        subset=["ticker", "year", "quarter"], keep="last"
+    )
+
+    return tech_all
+
+
+def build_feature_matrix() -> pd.DataFrame:
+    """
+    Merge crowding features and technical features per quarter.
+
+    Target definition:
+    - is_next_q_top50 = 1 if the stock appears in the next quarter's top 50
+      by top10_count.
+    - This is a proxy label inspired by GVIP construction, not the official index.
+    """
+    crowding_path = os.path.join(PROJECT_ROOT, "data/processed/crowding_features.csv")
+    ticker_map_path = os.path.join(PROJECT_ROOT, "data/processed/cusip_ticker_map.csv")
+
+    crowding = pd.read_csv(crowding_path, low_memory=False)
+    ticker_map = pd.read_csv(ticker_map_path, low_memory=False)
+
+    print(f"Crowding features: {crowding.shape}")
+
+    crowding = crowding.sort_values(["cusip", "year", "quarter"]).drop_duplicates(
+        subset=["cusip", "year", "quarter"], keep="last"
+    )
+    ticker_map = ticker_map.drop_duplicates(subset=["cusip"], keep="last")
+
+    crowding = crowding.merge(ticker_map, on="cusip", how="left", validate="many_to_one")
+
+    tech_all = _load_technical_features()
     print(f"Technical features: {tech_all.shape}")
 
-    # Merge crowding + technicals
     merged = crowding.merge(
-        tech_all, 
+        tech_all,
         on=["ticker", "year", "quarter"],
-        how="left"
+        how="left",
+        validate="many_to_one",
     )
     print(f"After merge: {merged.shape}")
 
-    # Construct target variable
-    # For each quarter, identify top 50 stocks by top10_count
-    # Target = 1 if stock is in top 50 in the NEXT quarter
+    dup_mask = merged.duplicated(subset=["cusip", "year", "quarter"], keep=False)
+    if dup_mask.any():
+        dup_rows = merged.loc[dup_mask, ["cusip", "year", "quarter"]].head(20)
+        raise ValueError(
+            "Duplicate rows detected after merge for cusip-year-quarter. "
+            f"Example duplicates:\n{dup_rows.to_string(index=False)}"
+        )
 
-    # Sort to ensure correct quarter ordering
-    merged = merged.sort_values(["cusip", "year", "quarter"]).reset_index(drop=True)
+    quarter_order = (
+        merged[["year", "quarter"]]
+        .drop_duplicates()
+        .sort_values(["year", "quarter"])
+        .reset_index(drop=True)
+    )
+    quarter_to_idx = {
+        (int(row.year), int(row.quarter)): idx
+        for idx, row in quarter_order.iterrows()
+    }
 
-    # Create a quarter index for easy shifting
-    quarter_order = sorted(merged[["year", "quarter"]].drop_duplicates().values.tolist())
-    quarter_to_idx = {(y, q): i for i, (y, q) in enumerate(quarter_order)}
     merged["quarter_idx"] = merged.apply(
-        lambda r: quarter_to_idx[(r["year"], r["quarter"])], axis=1
+        lambda r: quarter_to_idx[(int(r["year"]), int(r["quarter"]))], axis=1
     )
 
-    # For each quarter, get top 50 CISIPs by top10_count
     top50_per_quarter = {}
-    for (year, quarter), group in merged.groupby(["year", "quarter"]):
+    for (year, quarter), group in merged.groupby(["year", "quarter"], sort=True):
         top50 = group.nlargest(50, "top10_count")["cusip"].tolist()
-        idx = quarter_to_idx[(year, quarter)]
+        idx = quarter_to_idx[(int(year), int(quarter))]
         top50_per_quarter[idx] = set(top50)
 
-    # Target: is this stock in top50 of the next quarter?
-    def get_target(row):
-        next_idx = row["quarter_idx"] + 1
+    def get_label(row):
+        next_idx = int(row["quarter_idx"]) + 1
         if next_idx not in top50_per_quarter:
             return np.nan
-        return 1 if row["cusip"] in top50_per_quarter[next_idx] else 0
+        return int(row["cusip"] in top50_per_quarter[next_idx])
 
-    print("Computing target variable...")
-    merged["target"] = merged.apply(get_target, axis=1)
+    print("Computing label...")
+    merged["is_next_q_top50"] = merged.apply(get_label, axis=1)
 
-    # Drop last quarter — no next quarter to predict
-    merged = merged[merged["target"].notna()].copy()
+    merged["target"] = merged["is_next_q_top50"]
+
+    merged = merged[merged["is_next_q_top50"].notna()].copy()
+    merged["is_next_q_top50"] = merged["is_next_q_top50"].astype(int)
     merged["target"] = merged["target"].astype(int)
 
     print(f"\nFinal feature matrix: {merged.shape}")
-    print(f"Target distribution:\n{merged['target'].value_counts()}")
-    print(f"Positive rate: {merged['target'].mean():.4f}")
+    print("Label distribution:")
+    print(merged["is_next_q_top50"].value_counts())
+    print(f"Positive rate: {merged['is_next_q_top50'].mean():.4f}")
 
     return merged
 
 
 if __name__ == "__main__":
     feature_matrix = build_feature_matrix()
-
     output_path = os.path.join(PROJECT_ROOT, "data/features/feature_matrix.csv")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     feature_matrix.to_csv(output_path, index=False)

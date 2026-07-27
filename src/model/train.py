@@ -30,6 +30,8 @@ FEATURE_COLS = [
     "macd_histogram"
 ]
 
+LABEL_COL = "is_next_q_top50"
+
 # Technical-only feature set (no crowding features)
 TECHNICAL_ONLY_COLS = [
     "return_1m", "return_3m", "return_6m", "return_12m",
@@ -57,21 +59,26 @@ def load_feature_matrix() -> pd.DataFrame:
 
 
 def split_data(df: pd.DataFrame):
-    """Split into train, validation, test sets by quarter_idx."""
-    train = df[df["quarter_idx"] <= TRAIN_END_IDX].copy()
-    val = df[(df["quarter_idx"] > TRAIN_END_IDX) &
-             (df["quarter_idx"] <= VAL_END_IDX)].copy()
-    test = df[df["quarter_idx"] > VAL_END_IDX].copy()
+    quarter_idxs = sorted(df["quarter_idx"].dropna().unique())
+    if len(quarter_idxs) < 5:
+        raise ValueError("Need at least 5 labeled quarters for the current split.")
 
-    print(f"Train: {len(train)} rows, {train['target'].sum()} positives")
-    print(f"Val:   {len(val)} rows, {val['target'].sum()} positives")
-    print(f"Test:  {len(test)} rows, {test['target'].sum()} positives")
+    train_end_idx = quarter_idxs[-5]
+    val_end_idx = quarter_idxs[-3]
+
+    train = df[df["quarter_idx"] <= train_end_idx].copy()
+    val = df[(df["quarter_idx"] > train_end_idx) &
+             (df["quarter_idx"] <= val_end_idx)].copy()
+    test = df[df["quarter_idx"] > val_end_idx].copy()
+
+    print(f"Train: {len(train)} rows, {train[LABEL_COL].sum()} positives")
+    print(f"Val:   {len(val)} rows, {val[LABEL_COL].sum()} positives")
+    print(f"Test:  {len(test)} rows, {test[LABEL_COL].sum()} positives")
 
     return train, val, test
 
 
 def evaluate(model, X, y, label: str):
-    """Print evaluation metrics for a dataset."""
     preds_proba = model.predict_proba(X)[:, 1]
     preds = (preds_proba >= 0.5).astype(int)
 
@@ -100,10 +107,8 @@ def evaluate_topk(model, X, y, k: int = 50, label: str = ""):
     
     # Get indices of top-K predictions
     top_k_idx = np.argsort(probas)[::-1][:k]
-    
     # How many of top-K are actual positives?
     top_k_precision = y.iloc[top_k_idx].sum() / k
-    
     # How many actual positives are in top-K?
     top_k_recall = y.iloc[top_k_idx].sum() / y.sum()
     
@@ -120,14 +125,12 @@ def train_model(df: pd.DataFrame):
     train, val, test = split_data(df)
 
     X_train = train[FEATURE_COLS]
-    y_train = train["target"]
     X_val = val[FEATURE_COLS]
-    y_val = val["target"]
     X_test = test[FEATURE_COLS]
-    y_test = test["target"]
+    y_train = train[LABEL_COL]
+    y_val = val[LABEL_COL]
+    y_test = test[LABEL_COL]
 
-    # Handle class imbalance
-    # scale_pos_weight = negative samples / positive samples
     neg = (y_train == 0).sum()
     pos = (y_train == 1).sum()
     scale_pos_weight = neg / pos
@@ -194,11 +197,11 @@ def train_model_ablation(df: pd.DataFrame):
         print(f"{'='*50}")
 
         X_train = train[features]
-        y_train = train["target"]
         X_val = val[features]
-        y_val = val["target"]
         X_test = test[features]
-        y_test = test["target"]
+        y_train = train[LABEL_COL]
+        y_val = val[LABEL_COL]
+        y_test = test[LABEL_COL]
 
         neg = (y_train == 0).sum()
         pos = (y_train == 1).sum()

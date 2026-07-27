@@ -22,14 +22,14 @@ OPENFIGI_HEADERS = {
 
 def classify_cusips(cusips: list) -> pd.DataFrame:
     """
-    Given a list of CUSIPs, classify each as stock or ETF/fund
-    using OpenFIGI API. Free, no API key required.
+    Given a list of CUSIPs, classify each as stock or ETF/fund. 
+    Uses OpenFIGI with an API key loaded from .env when available.
     
-    OpenFIGI accepts batches of 50 CUSIPs per request.
+    OpenFIGI accepts batches of 10 CUSIPs here.
     """
     results = []
     
-    # Process in batches of 50
+    # Process in batches of 10
     for i in range(0, len(cusips), 10):
         batch = cusips[i:i+10]
         
@@ -48,7 +48,7 @@ def classify_cusips(cusips: list) -> pd.DataFrame:
                 response = requests.post(OPENFIGI_URL, json=payload, headers=OPENFIGI_HEADERS, timeout=10)
             
             if response.status_code != 200:
-                print(f"OpenFIGI error {response.status_code} on batch {i//50 + 1}")
+                print(f"OpenFIGI error {response.status_code} on batch {i//10 + 1}")
                 print(f"Response: {response.text[:200]}")
                 continue
             
@@ -76,11 +76,11 @@ def classify_cusips(cusips: list) -> pd.DataFrame:
                     })
         
         except Exception as e:
-            print(f"Error on batch {i//50 + 1}: {e}")
+            print(f"Error on batch {i//10 + 1}: {e}")
             continue
         
-        if (i//50 + 1) % 10 == 0:
-            print(f"Processed batch {i//50 + 1}/{(len(cusips)-1)//50 + 1}")
+        if (i//10 + 1) % 10 == 0:
+            print(f"Processed batch {i//10 + 1}/{(len(cusips)-1)//10 + 1}")
     
     return pd.DataFrame(results)
 
